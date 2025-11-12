@@ -1,0 +1,90 @@
+---
+title: "Untitled"
+format: html
+---
+
+
+# %%
+pa_birth<- readRDS("~/Documents/pa_births/formatted_data/pa_birth_formatted.rds") |>
+  dplyr::mutate(lat = str_replace(lat, "^0+", ""),
+         long = str_replace(long, "^0+", "")) |>
+  tidyr::drop_na(childmthb, childdayb, childyrb, 
+          lat, long, lop) |>
+  dplyr::filter(lat != "" | long != "",
+                momresstate %in% c("Pennsylvania", "PENNSYLVANIA"))|>
+  dplyr::mutate(delivery_date = as.Date(paste(childyrb, childmthb, childdayb, sep = "-")),
+         #revising start date to 2 weeks before LMP
+         start_date = delivery_date - weeks(lop+2)) |>
+  dplyr::mutate_at(dplyr::vars(lat, long), as.numeric) |>
+  rename(end_date = delivery_date) |>
+  mutate(num_exp_days = as.numeric(end_date - start_date) + 1) |>
+  select(
+    c(id, lop, lat, long, start_date, end_date,
+      mothage, mothedu, mothrace, mothhisp, marital, mwic, plural,
+      momhtfeet, momhtinches, mppwgt, #calculate bmi
+      payment,
+      smkpr, smkftm, smkstm, smkltm, #code smoke_preg to yes if any of these have values between 01 and 98
+      sex, bweight, lop, deceased,
+      r1, r2, r3, r4)) |>
+  mutate(
+    plural = ifelse(plural == 9, NA, plural),
+    smoke_preg = as.factor(case_when(
+      smkpr %in% 1:98 | smkftm %in% 1:98 | smkstm %in% 1:98 | smkltm %in% 1:98 ~ 1,
+      TRUE ~ 0
+    )),
+    ppbmi = ifelse(
+      !is.na(mppwgt) & !is.na(momhtfeet),
+      as.numeric(mppwgt) / 
+        ((as.numeric(momhtfeet) * 12 + as.numeric(momhtinches))^2) * 703,
+      NA
+    ),
+    mothedu = case_when(
+    mothedu %in% 1:3 ~ "High school or less",
+    mothedu %in% 4:6 ~ "Degree",
+    mothedu %in% 7:8 ~ "Postgraduate",
+    mothedu == 9 ~ NA_character_
+  ),
+  mothrace = case_when(
+    mothrace %in% 1 ~ "white",
+    mothrace %in% 2 ~ "black",
+    mothrace %in% 3:15 ~ "other",
+    mothrace %in% 16:18 ~ NA_character_
+  ),
+  mothhisp = case_when(
+    mothhisp %in% 1 ~ "not_hisp",
+    mothhisp %in% 2:4 ~ "hispanic",
+    mothhisp == 5 ~ "other",
+    mothhisp == 9 ~ NA_character_
+  ),
+  payment = case_when(
+    payment == 1 ~ "private_ins",
+    payment == 2 ~ "medicaid",
+    payment == 3 ~ "self_pay",
+    payment == 4 ~ "other",
+    payment == 9 ~ NA_character_
+  ),
+  ptb = as.factor(if_else(lop < 37, "preterm", "term")),
+  lbw = as.factor(if_else(bweight < 2500, "LBW", "normal"))
+  ) |>
+  select(-c(smkpr, smkftm, smkstm, smkltm, mppwgt, momhtfeet, momhtinches)) |>
+  filter(mothage<50)
+
+
+#table of missing variable percentages
+# %%
+pa_birth_missing<- pa_birth |>
+  summarise(across(everything(), ~ sum(is.na(.)) / n() * 100)) |>
+  pivot_longer(everything(), names_to = "variable", values_to = "missing_percentage")
+
+
+#exposure data
+# %%
+pm_data<- readRDS("~/Documents/ap_brith_out_pa_reg/air_poll_pj/PM_extraction_20251112_105736.rds") |>
+  select(id, raster_value) |>
+  rename(pm = raster_value)
+
+bc_data<- readRDS("~/Documents/ap_brith_out_pa_reg/air_poll_pj/BC_extraction_20251112_112830.rds") |>
+  select(id, raster_value) |>
+  rename(bc = raster_value)
+
+

@@ -1,0 +1,69 @@
+---
+title: "03_ap_exp_assmnt"
+author: "Jagadeesh Puvvula"
+date: "2025-11-07"
+output: pdf_document
+---
+
+#load data for exposure assessment
+```{r}
+pa_birth<- readRDS("~/Documents/pa_births/formatted_data/pa_birth_formatted.rds") |>
+  dplyr::mutate(lat = str_replace(lat, "^0+", ""),
+         long = str_replace(long, "^0+", "")) |>
+  tidyr::drop_na(childmthb, childdayb, childyrb, 
+          lat, long, lop) |>
+  dplyr::filter(lat != "" | long != "",
+                momresstate %in% c("Pennsylvania", "PENNSYLVANIA"))|>
+  dplyr::mutate(delivery_date = as.Date(paste(childyrb, childmthb, childdayb, sep = "-")),
+         #revising start date to 2 weeks before LMP
+         start_date = delivery_date - weeks(lop+2)) |>
+  dplyr::mutate_at(dplyr::vars(lat, long), as.numeric) |>
+  dplyr::select(id, lop, lat, long, start_date, delivery_date) |>
+  rename(end_date = delivery_date) |>
+  mutate(num_exp_days = as.numeric(end_date - start_date) + 1)
+```
+
+#check spatiotemporal extent
+```{r}
+ggplot() +
+  geom_point(data = pa_birth, aes(x = long, y = lat), alpha = 0.1) +
+  coord_fixed() +
+  theme_minimal() +
+  labs(title = "Spatial Distribution of Birth Records in PA",
+       x = "Longitude",
+       y = "Latitude")
+
+ggplot(pa_birth, aes(x = start_date)) +
+  geom_histogram(binwidth = 30, fill = "blue", color = "white", alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Temporal Distribution of Birth Records in PA",
+       x = "Start Date",
+       y = "Count")
+```
+
+
+#assign PM2.5 exposure
+```{r}
+getRasterValueInRange(
+    dataframe = pa_birth,               # dataframe with id, lat, long, start_date, end_date columns
+    input_folder_name = "~/Documents/ap_2000_2020/ap_db", #my air pollution database
+    output_folder_name = "~/Documents/pa_births/air_poll_pj", #where to save results
+    pollutant = "PM",
+    use_parallel = TRUE,
+    n_cores = 10,
+    batch_size = 50000
+)
+```
+
+#assign BC exposure
+```{r}
+getRasterValueInRange(
+    dataframe = pa_birth,               # dataframe with id, lat, long, start_date, end_date columns
+    input_folder_name = "~/Documents/ap_2000_2020/ap_db", #my air pollution database
+    output_folder_name = "~/Documents/pa_births/air_poll_pj", #where to save results
+    pollutant = "BC",
+    use_parallel = TRUE,
+    n_cores = 10,
+    batch_size = 50000
+)
+```
