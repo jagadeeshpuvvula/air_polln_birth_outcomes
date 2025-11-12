@@ -4,7 +4,6 @@ format: html
 ---
 
 
-```{r}
+# %%
 library(pacman)
-p_load(tidyverse, janitor, dlnm)
-```
+p_load(tidyverse, janitor, dlnm, tigris, sf)

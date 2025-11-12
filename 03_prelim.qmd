@@ -1,5 +1,5 @@
 ---
-title: "Untitled"
+title: "preliminary data processing and exploration"
 format: html
 ---
 
@@ -104,5 +104,16 @@ bc_data<- readRDS("~/Documents/ap_brith_out_pa_reg/air_poll_pj/BC_extraction_202
 
 
 
-# %%
-skimr::skim(pa_birth)
+# %% create a pattern map to show density of observations with PA state boundary using ggplot
+# Use tigris to get Pennsylvania state shapefile
+ggplot(pa_birth, aes(x = long, y = lat)) +
+  geom_bin2d(bins = 1000) +  # fewer bins = faster + cleaner
+  geom_polygon(data = pa_map, aes(x = long, y = lat, group = group),
+               fill = NA, color = "black", size = 0.5) +
+  scale_fill_viridis_c(option = "plasma") +
+  coord_fixed(1.3) +
+  labs(title = " ",
+       x = "", y = "", fill = "") +
+  theme_void() +
+  theme(legend.position = "none",
+        plot.title = element_text(hjust = 0.5, size = 16))
