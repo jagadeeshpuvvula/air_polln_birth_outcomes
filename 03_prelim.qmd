@@ -24,7 +24,7 @@ pa_birth<- readRDS("~/Documents/pa_births/formatted_data/pa_birth_formatted.rds"
       momhtfeet, momhtinches, mppwgt, #calculate bmi
       payment,
       smkpr, smkftm, smkstm, smkltm, #code smoke_preg to yes if any of these have values between 01 and 98
-      sex, bweight, lop, deceased,
+      sex, bweight, deceased,
       r1, r2, r3, r4)) |>
   mutate(
     plural = ifelse(plural == 9, NA, plural),
@@ -67,7 +67,22 @@ pa_birth<- readRDS("~/Documents/pa_births/formatted_data/pa_birth_formatted.rds"
   lbw = as.factor(if_else(bweight < 2500, "LBW", "normal"))
   ) |>
   select(-c(smkpr, smkftm, smkstm, smkltm, mppwgt, momhtfeet, momhtinches)) |>
-  filter(mothage<50)
+  filter(mothage>15 & mothage<50) |>
+  mutate(
+    sex    = recode(sex, "Male" = "M", "Female" = "F"),
+    ga     = floor(as.numeric(lop)),
+    b_wght = as.numeric(bweight)
+  ) |>
+  left_join(olsen_ref, by = c("sex", "ga")) |>
+  mutate(
+    bw_z_scr = if_else(
+      !is.na(sex) & !is.na(ga) & !is.na(b_wght) & !is.na(mean_bw) & !is.na(sd_bw),
+      (b_wght - mean_bw) / sd_bw,
+      NA_real_
+    )
+  ) |>
+  select(-c(mean_bw, sd_bw, bweight, ga)) |>
+  mutate(across(where(is.character), as.factor))
 
 
 #table of missing variable percentages
@@ -88,3 +103,6 @@ bc_data<- readRDS("~/Documents/ap_brith_out_pa_reg/air_poll_pj/BC_extraction_202
   rename(bc = raster_value)
 
 
+
+# %%
+skimr::skim(pa_birth)
