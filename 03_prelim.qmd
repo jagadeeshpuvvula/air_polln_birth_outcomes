@@ -4,7 +4,7 @@ format: html
 ---
 
 
-# %%
+# %% Load data and prepare analytical sample
 pa_birth<- readRDS("~/Documents/pa_births/formatted_data/pa_birth_formatted.rds") |>
   dplyr::mutate(lat = str_replace(lat, "^0+", ""),
          long = str_replace(long, "^0+", "")) |>
@@ -67,21 +67,29 @@ pa_birth<- readRDS("~/Documents/pa_births/formatted_data/pa_birth_formatted.rds"
   lbw = as.factor(if_else(bweight < 2500, "LBW", "normal"))
   ) |>
   select(-c(smkpr, smkftm, smkstm, smkltm, mppwgt, momhtfeet, momhtinches)) |>
-  filter(mothage>15 & mothage<50) |>
+  filter(mothage>15 & mothage<50,
+        lop>23) |>
   mutate(
     sex    = recode(sex, "Male" = "M", "Female" = "F"),
     ga     = floor(as.numeric(lop)),
     b_wght = as.numeric(bweight)
   ) |>
-  left_join(olsen_ref, by = c("sex", "ga")) |>
+  left_join(olsen_ref |> select(sex, ga, mean_bw, sd_bw, p10_bw, p90_bw), by = c("sex", "ga")) |>
   mutate(
     bw_z_scr = if_else(
       !is.na(sex) & !is.na(ga) & !is.na(b_wght) & !is.na(mean_bw) & !is.na(sd_bw),
       (b_wght - mean_bw) / sd_bw,
       NA_real_
-    )
-  ) |>
-  select(-c(mean_bw, sd_bw, bweight, ga)) |>
+    ),
+    sga = as.factor(if_else(
+      is.na(b_wght) | is.na(p10_bw), NA_character_, 
+      if_else(b_wght < p10_bw, "SGA", "AGA")
+    )),
+    lga = as.factor(if_else(
+      is.na(b_wght) | is.na(p90_bw), NA_character_, 
+      if_else(b_wght > p90_bw, "LGA", "AGA")
+    )) |>
+  select(-c(mean_bw, sd_bw, bweight, ga, p10_bw, p90_bw)) |>
   mutate(across(where(is.character), as.factor))
 
 
