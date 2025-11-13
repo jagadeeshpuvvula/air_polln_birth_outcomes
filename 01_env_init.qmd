@@ -6,4 +6,4 @@ format: html
 
 # %%
 library(pacman)
-p_load(tidyverse, janitor, dlnm, skim)
+p_load(tidyverse, janitor, dlnm, skim, gtsummary)
