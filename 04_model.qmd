@@ -1,0 +1,110 @@
+---
+title: "Untitled"
+format: html
+---
+
+
+# %% load data
+load("~/Documents/ap_brith_out_pa_reg/data/pa_analy_data.rda")
+
+#trim exposures to weeks before LMP to 20 weeks gestation
+bc_data <- bc_data |>
+  mutate(bc = map(bc, ~ set_names(.x[1:154], paste0("bc_", 1:154)))) |>
+  unnest_wider(bc)
+
+pm_data <- pm_data |>
+  mutate(pm = map(pm, ~ set_names(.x[1:154], paste0("pm_", 1:154)))) |>
+  unnest_wider(pm)
+
+
+
+# %%
+results <- fit_dlnm(
+  exposure_data = bc_data,
+  outcome_data = pa_bd,
+  id_var = "id",
+  exposure_prefix = "bc",
+  outcome_var = "ptb",
+  covariates = c("mothage", "mothrace", "mothedu", "mothhisp", "marital", "mwic",
+                 "plural", "smoke_preg", "ppbmi")
+)
+
+
+# %%
+bc_lag <- extract_lag_effects(
+   results,
+   target_percentile = 0.85,
+   exposure_name = "Black Carbon",
+   lag_multiplier = 1,
+   lag_offset = 1
+ ) |>
+  mutate(Lag = Lag - 15)
+
+
+
+# %%
+ggplot(bc_lag, aes(x = Lag, y = OR, color = as.factor(exposure))) +
+  # Confidence interval ribbon - more visible but still subtle
+  geom_ribbon(aes(ymin = OR_low, ymax = OR_high, fill = as.factor(exposure)), 
+              alpha = 0.1, color = NA) +
+  
+  # Main trend line
+  geom_line(linewidth = 1.2) +
+  
+  # Reference line at OR = 1
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray40", linewidth = 0.8) +
+  geom_vline(xintercept = 100, linetype = "dashed", color = "black", linewidth = 0.8) +
+  geom_vline(xintercept = 140, linetype = "dashed", color = "black", linewidth = 0.8) +
+  
+  # Clean axis labels
+  labs(
+    x = "Gestational Age (days)",
+    y = "Odds Ratio (95%CI)",
+    color = "Exposure",
+    fill = "Exposure"
+  ) +
+  
+  # Publication-quality theme
+  theme_classic() +
+  theme(
+    # Remove minor grid lines
+    panel.grid.minor = element_blank(),
+    
+    # Customize major grid lines (optional - remove if not needed)
+    panel.grid.major = element_line(color = "gray90", size = 0.5),
+    
+    # Axis styling
+    axis.text = element_text(size = 12, color = "black"),
+    axis.title = element_text(size = 14, face = "bold"),
+    axis.line = element_line(color = "black", size = 0.8),
+    axis.ticks = element_line(color = "black", size = 0.8),
+    
+    # Legend styling
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 11),
+    legend.position = "bottom",
+    legend.box = "horizontal",
+    
+    # Overall plot styling
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    
+    # Add some padding around the plot
+    plot.margin = margin(20, 20, 20, 20)
+  ) +
+  
+  # Custom color palette - adjust values/names to match your actual exposure factor levels
+  scale_color_manual(values = c("steelblue", "darkred", "forestgreen")) +
+  scale_fill_manual(values = c("steelblue", "darkred", "forestgreen")) +
+  
+  # Y-axis formatting for OR values
+  scale_y_continuous(
+    breaks = scales::pretty_breaks(n = 6),
+    labels = scales::number_format(accuracy = 0.001)
+  ) +
+  
+  # X-axis formatting
+  scale_x_continuous(
+  limits = c(-14, 140),
+  breaks = seq(-14, 140, by =  (140 - (-14)) / 7 ))
+  )

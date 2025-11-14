@@ -3,7 +3,6 @@ title: "preliminary data processing and exploration"
 format: html
 ---
 
-
 # %% Load data and prepare analytical sample
 pa_birth <- readRDS("~/Documents/pa_births/formatted_data/pa_birth_formatted.rds") |>
   mutate(

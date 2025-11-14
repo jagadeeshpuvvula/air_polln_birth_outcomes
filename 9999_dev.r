@@ -46,3 +46,211 @@ olsen_ref <- tribble(
   "M", 40, 3582, 493, 2666, 2950, 3245, 3579, 3919, 4232, 4545,
   "M", 41, 3691, 518, 2755, 3039, 3333, 3666, 4007, 4319, 4633
 )
+
+
+
+# %%
+#' Fit DLNM model with separate exposure and outcome datasets
+#'
+#' @param exposure_data Dataframe containing exposure variables with common prefix
+#' @param outcome_data Dataframe containing outcome and covariates
+#' @param id_var Character string of ID variable name to merge datasets
+#' @param exposure_prefix Character string prefix for exposure columns (e.g., "bc", "pm")
+#' @param outcome_var Character string name of outcome variable
+#' @param covariates Character vector of covariate names
+#' @param var_df Degrees of freedom for exposure-response (default = 3)
+#' @param var_degree Degree for B-spline on exposure (default = 2)
+#' @param lag_df Degrees of freedom for lag structure (default = 3)
+#' @param family Family for glm (default = binomial())
+#' @param center_value How to center predictions: "median", "mean", or numeric value (default = "median")
+#' @param n_pred_points Number of points for prediction grid (default = 50)
+#'
+#' @return List containing model, crosspred object, data used, and metadata
+fit_dlnm <- function(exposure_data,
+                     outcome_data,
+                     id_var,
+                     exposure_prefix,
+                     outcome_var,
+                     covariates,
+                     var_df = 3,
+                     var_degree = 2,
+                     lag_df = 3,
+                     family = binomial(),
+                     center_value = "median",
+                     n_pred_points = 50) {
+  
+  # Load required libraries
+  require(tidyverse, quietly = TRUE)
+  require(dlnm, quietly = TRUE)
+  
+  # Step 1: Merge datasets by ID
+  merged_data <- outcome_data %>%
+    inner_join(exposure_data, by = id_var)
+  
+  cat("After merging by", id_var, ":", nrow(merged_data), "observations\n")
+  
+  # Step 2: Extract exposure variables
+  exposure_vars <- names(merged_data) %>% str_subset(paste0("^", exposure_prefix))
+  
+  if(length(exposure_vars) == 0) {
+    stop("No exposure variables found with prefix '", exposure_prefix, "'")
+  }
+  
+  cat("Found", length(exposure_vars), "exposure variables with prefix '", exposure_prefix, "'\n")
+  
+  # Step 3: Create exposure matrix
+  Q_matrix <- as.matrix(merged_data[, exposure_vars])
+  colnames(Q_matrix) <- paste0("lag", 0:(ncol(Q_matrix)-1))
+  
+  # Step 4: Handle missing values
+  # Check for missing in exposure, outcome, and covariates
+  all_vars <- c(exposure_vars, outcome_var, covariates)
+  complete_rows <- complete.cases(merged_data[, all_vars])
+  
+  n_missing <- sum(!complete_rows)
+  if(n_missing > 0) {
+    cat("Dropping", n_missing, "observations with missing values\n")
+    Q_matrix <- Q_matrix[complete_rows, ]
+    merged_data <- merged_data[complete_rows, ]
+  }
+  
+  cat("\n**Final sample size:", nrow(merged_data), "observations**\n\n")
+  
+  # Step 5: Create cross-basis matrix
+  cb <- crossbasis(Q_matrix, 
+                   lag = c(0, ncol(Q_matrix)-1),
+                   argvar = list(fun = "bs", degree = var_degree, df = var_df),
+                   arglag = list(fun = "ns", df = lag_df, intercept = FALSE))
+  
+  # Step 6: Build formula
+  covariate_formula <- paste(covariates, collapse = " + ")
+  formula_str <- paste(outcome_var, "~ cb +", covariate_formula)
+  model_formula <- as.formula(formula_str)
+  
+  cat("Model formula:", formula_str, "\n\n")
+  
+  # Step 7: Fit model
+  model <- glm(model_formula, family = family, data = merged_data)
+  
+  # Step 8: Create predictions
+  # Determine centering value
+  if(is.numeric(center_value)) {
+    cen_value <- center_value
+  } else if(center_value == "median") {
+    cen_value <- median(Q_matrix, na.rm = TRUE)
+  } else if(center_value == "mean") {
+    cen_value <- mean(Q_matrix, na.rm = TRUE)
+  } else {
+    stop("center_value must be 'median', 'mean', or a numeric value")
+  }
+  
+  temp_range <- range(Q_matrix, na.rm = TRUE)
+  temp_values <- seq(temp_range[1], temp_range[2], length.out = n_pred_points)
+  
+  pred <- crosspred(cb, model, 
+                    cen = cen_value,
+                    at = temp_values)
+  
+  # Return results
+  results <- list(
+    model = model,
+    pred = pred,
+    data = merged_data,
+    Q_matrix = Q_matrix,
+    crossbasis = cb,
+    metadata = list(
+      n_obs = nrow(merged_data),
+      n_exposure_lags = ncol(Q_matrix),
+      exposure_prefix = exposure_prefix,
+      outcome_var = outcome_var,
+      covariates = covariates,
+      center_value = cen_value,
+      formula = formula_str
+    )
+  )
+  
+  cat("Model fitting complete!\n")
+  cat("Centered at:", cen_value, "\n")
+  
+  return(results)
+}
+
+# Example usage:
+# results <- fit_dlnm(
+#   exposure_data = bc_data,
+#   outcome_data = outcome_data,
+#   id_var = "id",
+#   exposure_prefix = "bc",
+#   outcome_var = "ptb",
+#   covariates = c("mothage", "mothrace")
+# )
+# 
+
+
+
+
+# %%
+#' Extract lag-specific effects at a target exposure level
+#'
+#' @param results Output from fit_dlnm()
+#' @param target_percentile Percentile of exposure (e.g., 0.75 for 75th percentile)
+#' @param target_value Specific exposure value (overrides target_percentile if provided)
+#' @param exposure_name Label for the exposure (e.g., "Tmax", "PM2.5", "Black Carbon")
+#' @param lag_multiplier Multiplier for lag values (default = 1)
+#' @param lag_offset Offset to add to lag values (default = 0)
+#'
+#' @return Dataframe with Lag, OR, OR_low, OR_high, and exposure columns
+extract_lag_effects <- function(results,
+                                target_percentile = 0.75,
+                                target_value = NULL,
+                                exposure_name = NULL,
+                                lag_multiplier = 1,
+                                lag_offset = 0) {
+  
+  # Load required library
+  require(tidyverse, quietly = TRUE)
+  
+  Q_matrix <- results$Q_matrix
+  pred <- results$pred
+  
+  # Get temperature values used in prediction
+  temp_values <- as.numeric(rownames(pred$matRRfit))
+  
+  # Determine target temperature
+  if(!is.null(target_value)) {
+    target_temp <- target_value
+  } else {
+    target_temp <- quantile(Q_matrix, target_percentile, na.rm = TRUE)
+  }
+  
+  # Find closest temperature in prediction grid
+  closest_temp_idx <- which.min(abs(temp_values - target_temp))
+  closest_temp <- temp_values[closest_temp_idx]
+  
+  cat("Target exposure level:", target_temp, "\n")
+  cat("Closest value in prediction grid:", closest_temp, "\n")
+  cat("Reference (centered at):", results$metadata$center_value, "\n\n")
+  
+  # Extract lag-specific effects
+  lag_values <- 0:(ncol(Q_matrix) - 1)
+  lag_effects <- pred$matRRfit[closest_temp_idx, ]
+  lag_lower <- pred$matRRlow[closest_temp_idx, ]
+  lag_upper <- pred$matRRhigh[closest_temp_idx, ]
+  
+  # Create data frame
+  lag_df <- data.frame(
+    Lag = lag_values * lag_multiplier + lag_offset,
+    OR = lag_effects,
+    OR_low = lag_lower,
+    OR_high = lag_upper
+  )
+  
+  # Add exposure name if provided
+  if(!is.null(exposure_name)) {
+    lag_df <- lag_df %>% mutate(exposure = exposure_name)
+  } else {
+    lag_df <- lag_df %>% mutate(exposure = results$metadata$exposure_prefix)
+  }
+  
+  return(lag_df)
+}
